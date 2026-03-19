@@ -1,0 +1,646 @@
+import './index.css';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, collection, addDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { 
+  createIcons, 
+  Activity, 
+  ArrowRight, 
+  LineChart, 
+  User, 
+  Calendar, 
+  Info, 
+  RefreshCw, 
+  AlertTriangle, 
+  CalendarCheck, 
+  Printer,
+  ChevronRight
+} from 'lucide';
+
+// ==========================================
+// CONFIGURATION & DONNÉES
+// ==========================================
+const questions = [
+  {
+    id: 'q1',
+    text: "Sur les 14 derniers jours, combien d'étapes as-tu validées ?",
+    advice: "Si tu es bloqué(e) sur un plafond de verre, c'est que ta méthode d'entraînement à l'instant T n'est pas la bonne. Il faut ajuster l'approche (ralentir, isoler, etc.) ou me solliciter pour casser ce blocage au plus vite.",
+    options: [
+      { score: 1, text: "2 étapes ou plus", subtitle: "Je maintiens une excellente dynamique d'apprentissage." },
+      { score: 0.5, text: "1 étape", subtitle: "J'avance à un rythme modéré et constant." },
+      { score: 0, text: "0 (je suis confronté à un plafond de verre)", subtitle: "Je stagne et je n'arrive pas à franchir le cap." }
+    ]
+  },
+  {
+    id: 'q2',
+    text: "Sur les 7 derniers jours, combien de fois as-tu interagi avec le coach (moi) ?",
+    advice: "La G.I.A n'est pas une formation où tu es livré à toi-même. Le secret de la rapidité, c'est d'utiliser mes retours en continu (3x par semaine idéalement) pour débloquer les noeuds.",
+    options: [
+      { score: 1, text: "3 fois ou plus", subtitle: "Je pose des questions ou j'envoie des vidéos régulièrement." },
+      { score: 0.5, text: "1 à 2 fois", subtitle: "Je donne des nouvelles de temps en temps." },
+      { score: 0, text: "Jamais ou presque", subtitle: "J'essaie de deviner et me débrouiller seul dans mon coin." }
+    ]
+  },
+  {
+    id: 'q3',
+    text: "Sur 1h d'entraînement, combien de temps passes-tu à faire du jeu extrêmement lent (à 25 ou 35% de la vitesse) ?",
+    advice: "C'est le travail lent qui programme ton cerveau. Jouer vite et sale ne fait que renforcer tes défauts. Passe beaucoup plus de temps au ralenti parfait.",
+    options: [
+      { score: 1, text: "20 à 30 minutes minimum", subtitle: "Je décortique chaque micro-mouvement en profondeur." },
+      { score: 0.5, text: "5 à 10 minutes", subtitle: "Je le fais vite fait en échauffement, puis j'accélère." },
+      { score: 0, text: "Presque pas", subtitle: "Je joue quasiment tout le temps au tempo original." }
+    ]
+  },
+  {
+    id: 'q4',
+    text: "Visionnes-tu systématiquement tes vidéos pour t'auto-analyser AVANT de me les envoyer ?",
+    advice: "L'auto-analyse est cruciale. Souvent, tu peux constater par toi-même des erreurs évidentes. Les repérer seul t'évite des allers-retours inutiles : attendre 24h ma réponse, renvoyer une vidéo, réattendre 24h... En cumulé, ce sont des jours entiers de progression perdus juste parce que tu n'as pas cherché à identifier tes propres erreurs !",
+    options: [
+      { score: 1, text: "Toujours", subtitle: "Je m'écoute et j'identifie mes propres défauts d'abord." },
+      { score: 0.5, text: "Parfois", subtitle: "Si j'ai le temps ou si j'ai un doute sur la prise." },
+      { score: 0, text: "Jamais", subtitle: "J'envoie la prise sans me regarder." }
+    ]
+  },
+  {
+    id: 'q5',
+    text: "Si tu appliques parfaitement la méthode mais qu'une étape bloque, prends-tu le temps de jouer PLUS (plus de temps sur l'instrument) ?",
+    advice: "La méthode est puissante, mais tes doigts ont besoin de 'kilométrage'. Si tu appliques bien les règles mais que ça coince, le seul remède est d'augmenter le temps passé avec la guitare.",
+    options: [
+      { score: 1, text: "Oui, j'augmente le temps", subtitle: "Je passe 2 h au lieu d'une heure sur plusieurs jours pour forcer le passage physique." },
+      { score: 0.5, text: "J'essaie de maintenir mon rythme", subtitle: "Je reste sur mon temps habituel, même si ça bloque." },
+      { score: 0, text: "Je me frustre", subtitle: "Ça m'énerve de ne pas y arriver, donc j'ai tendance à jouer moins." }
+    ]
+  },
+  {
+    id: 'q6',
+    text: "T'entraînes-tu 45 min à 1h TOUS les jours sans exception ?",
+    advice: "La régularité quotidienne est le moteur principal. Crée un ancrage neurologique quotidien. 20 min un jour de fatigue valent mieux que zéro.",
+    options: [
+      { score: 1, text: "Oui, tous les jours", subtitle: "C'est une habitude ancrée, sans exception." },
+      { score: 0.5, text: "Je rate 1 ou 2 jours", subtitle: "J'essaie, mais ce n'est pas parfait toutes les semaines." },
+      { score: 0, text: "Non, c'est très irrégulier", subtitle: "Je joue uniquement quand j'ai le temps ou l'envie." }
+    ]
+  },
+  {
+    id: 'q7',
+    text: "Attends-tu mon feu vert avant de passer à l'exercice suivant ?",
+    advice: "Ne te valide pas toi-même ! Le risque est d'ancrer des défauts toxiques très longs à corriger.",
+    options: [
+      { score: 1, text: "Toujours", subtitle: "C'est toi qui valides, pas moi." },
+      { score: 0.5, text: "La plupart du temps", subtitle: "Sauf quand je suis vraiment très sûr(e) de moi." },
+      { score: 0, text: "Rarement", subtitle: "Si ça sonne bien à mes oreilles, j'avance à la suite." }
+    ]
+  },
+  {
+    id: 'q8',
+    text: "Utilises-tu le métronome avec les 3 zones (apprentissage, diag, perf) ?",
+    advice: "Isole les zones de blocage à vitesse réduite pour un diagnostic chirurgical. Ne force pas au tempo original.",
+    options: [
+      { score: 1, text: "Oui, systématiquement", subtitle: "Je respecte les paliers de tempo rigoureusement." },
+      { score: 0.5, text: "J'utilise le métronome", subtitle: "Mais sans vraiment séparer les 3 zones distinctes." },
+      { score: 0, text: "Non ou très peu", subtitle: "Je joue plutôt au feeling par-dessus la piste originale." }
+    ]
+  },
+  {
+    id: 'q10',
+    text: "Appliques-tu mes consignes à la lettre (ex: faire exactement 2 mesures à 30%) ?",
+    advice: "Ne fais pas d'à-peu-près. Un focus laser absolu sur la micro-tâche est le seul moyen de la perfectionner.",
+    options: [
+      { score: 1, text: "À la lettre", subtitle: "Je suis un vrai robot sur tes consignes." },
+      { score: 0.5, text: "Dans les grandes lignes", subtitle: "Mais je déborde parfois ou je joue un peu plus de mesures." },
+      { score: 0, text: "Pas vraiment", subtitle: "Je fais à ma sauce parce que 'ça passe'." }
+    ]
+  },
+  {
+    id: 'q11',
+    text: "Es-tu 100% focalisé(e) quand tu joues (pas de TV, pas de téléphone) ?",
+    advice: "La connexion cerveau/doigts doit être totale. 20 minutes hyper-focalisées explosent 45 minutes distrait.",
+    options: [
+      { score: 1, text: "Focus total", subtitle: "Je suis dans une bulle avec ma guitare." },
+      { score: 0.5, text: "Généralement", subtitle: "Mais je jette un oeil à mon tel de temps en temps." },
+      { score: 0, text: "Souvent distrait", subtitle: "Je joue devant la télé ou en pensant à autre chose." }
+    ]
+  },
+  {
+    id: 'q12',
+    text: "Comment réagis-tu quand je te demande de refaire un exercice ?",
+    advice: "Laisse l'ego au placard. Chaque feedback est une boussole pour t'éviter des mois de frustration et te guider vers la maîtrise.",
+    options: [
+      { score: 1, text: "Super !", subtitle: "Je le vois comme le raccourci direct vers mon objectif." },
+      { score: 0.5, text: "Un peu déçu(e) sur le coup", subtitle: "Mais je ravale mon ego et je m'y remets rapidement." },
+      { score: 0, text: "Je me vexe", subtitle: "Ça me dé motive fortement et je remets en question mon niveau." }
+    ]
+  }
+];
+
+// ==========================================
+// ÉTAT DE L'APPLICATION
+// ==========================================
+let state = {
+  view: 'intro',
+  user: null,
+  firstName: '',
+  lastName: '',
+  startDate: '',
+  currentQ: 0,
+  answers: {},
+  history: [],
+  appId: 'gia-diagnostic-app'
+};
+
+// ==========================================
+// INITIALISATION FIREBASE
+// ==========================================
+let db, auth;
+
+async function initFirebase() {
+  try {
+    const response = await fetch('/firebase-applet-config.json');
+    if (!response.ok || response.headers.get('content-type')?.includes('text/html')) {
+      throw new Error('Config file not found or invalid');
+    }
+    const firebaseConfig = await response.json();
+    const app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+
+    onAuthStateChanged(auth, (user) => {
+      state.user = user;
+      if (user) {
+        loadHistory();
+      } else {
+        signInAnonymously(auth);
+      }
+    });
+  } catch (error) {
+    console.error("Firebase non configuré ou erreur:", error);
+    // On continue en mode local si Firebase échoue
+    render();
+  }
+}
+
+function loadHistory() {
+  if (!state.user || !db) return;
+  const diagRef = collection(db, 'artifacts', state.appId, 'users', state.user.uid, 'diagnostics');
+  const q = query(diagRef, orderBy('createdAt', 'desc'));
+
+  onSnapshot(q, (snapshot) => {
+    state.history = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    if (state.history.length > 0 && !state.firstName) {
+      const last = state.history[0];
+      state.firstName = last.firstName || '';
+      state.lastName = last.lastName || '';
+      state.startDate = last.startDate || '';
+    }
+    render();
+  });
+}
+
+// ==========================================
+// LOGIQUE MÉTIER
+// ==========================================
+function calculateScore() {
+  const totalScore = Object.values(state.answers).reduce((sum, val) => sum + val, 0);
+  const maxScore = questions.length;
+  const percentage = totalScore / maxScore;
+  
+  let estimatedMonths = 36;
+  if (percentage >= 0.95) estimatedMonths = 4;
+  else if (percentage >= 0.85) estimatedMonths = 5;
+  else if (percentage >= 0.75) estimatedMonths = 6;
+  else if (percentage >= 0.60) estimatedMonths = 8;
+  else if (percentage >= 0.45) estimatedMonths = 10;
+  else if (percentage >= 0.30) estimatedMonths = 14;
+  else if (percentage >= 0.15) estimatedMonths = 24;
+  else estimatedMonths = 36;
+  
+  return {
+    totalScore,
+    percentage: Math.round(percentage * 100),
+    estimatedMonths
+  };
+}
+
+function getWeakPoints() {
+  const weak = [];
+  Object.keys(state.answers).forEach(qIndex => {
+    const idx = parseInt(qIndex);
+    if (state.answers[qIndex] < 1) {
+      weak.push({
+        qIndex: idx,
+        score: state.answers[qIndex],
+        advice: questions[idx].advice,
+        text: questions[idx].text
+      });
+    }
+  });
+  return weak.sort((a, b) => a.score - b.score).slice(0, 3);
+}
+
+async function saveDiagnostic() {
+  if (!state.user || !db) return;
+  const stats = calculateScore();
+  const weakPoints = getWeakPoints();
+  
+  const diagData = {
+    createdAt: Date.now(),
+    firstName: state.firstName.trim(),
+    lastName: state.lastName.trim(),
+    startDate: state.startDate,
+    score: stats.percentage,
+    estimatedMonths: stats.estimatedMonths,
+    weakPoints: weakPoints,
+    answers: state.answers
+  };
+
+  try {
+    await addDoc(collection(db, 'artifacts', state.appId, 'users', state.user.uid, 'diagnostics'), diagData);
+  } catch (err) {
+    console.error("Erreur sauvegarde:", err);
+  }
+}
+
+// ==========================================
+// MOTEUR DE RENDU (VANILLA JS)
+// ==========================================
+const appContainer = document.getElementById('app');
+
+function render() {
+  appContainer.innerHTML = '';
+  
+  switch (state.view) {
+    case 'intro': renderIntro(); break;
+    case 'setup': renderSetup(); break;
+    case 'quiz': renderQuiz(); break;
+    case 'result': renderResult(); break;
+    case 'history': renderHistory(); break;
+  }
+  
+  // Initialise les icônes Lucide après chaque rendu
+  createIcons({
+    icons: {
+      Activity, ArrowRight, LineChart, User, Calendar, Info, RefreshCw, AlertTriangle, CalendarCheck, Printer, ChevronRight
+    }
+  });
+}
+
+function renderIntro() {
+  appContainer.innerHTML = `
+    <div class="min-h-screen flex flex-col items-center justify-center p-6 relative overflow-hidden">
+      <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-cyan-500/10 rounded-full blur-[100px]"></div>
+      
+      <div class="max-w-2xl w-full text-center z-10 animate-in fade-in duration-700">
+        <div class="inline-flex items-center justify-center p-5 rounded-full bg-slate-900 border border-slate-700 shadow-[0_0_30px_rgba(6,182,212,0.2)] mb-8">
+          <i data-lucide="activity" class="w-12 h-12 text-cyan-400"></i>
+        </div>
+        
+        <h1 class="text-4xl md:text-5xl font-black mb-4 text-white tracking-tight">
+          Diagnostic <span class="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-emerald-400">G.I.A</span>
+        </h1>
+        
+        <p class="text-xl text-slate-400 mb-10 leading-relaxed font-light">
+          Es-tu parfaitement aligné(e) avec la méthode pour maîtriser la guitare en 6 mois, ou es-tu en train de dériver vers la zone rouge ?<br/><br/>
+          <span class="text-sm font-bold uppercase tracking-widest text-slate-500">Auto-évaluation rapide • 12 points clés</span>
+        </p>
+
+        <div class="flex flex-col md:flex-row gap-4 justify-center">
+          <button id="btn-start" class="px-8 py-4 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-xl transition-all shadow-[0_0_20px_rgba(6,182,212,0.4)] flex items-center justify-center cursor-pointer">
+            Lancer le Diagnostic <i data-lucide="arrow-right" class="ml-2 w-5 h-5"></i>
+          </button>
+          
+          ${state.history.length > 0 ? `
+            <button id="btn-history" class="px-8 py-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl transition-all border border-slate-700 flex items-center justify-center cursor-pointer">
+              <i data-lucide="line-chart" class="mr-2 w-5 h-5"></i> Voir mon évolution
+            </button>
+          ` : ''}
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('btn-start')?.addEventListener('click', () => {
+    state.view = 'setup';
+    render();
+  });
+  document.getElementById('btn-history')?.addEventListener('click', () => {
+    state.view = 'history';
+    render();
+  });
+}
+
+function renderSetup() {
+  appContainer.innerHTML = `
+    <div class="min-h-screen flex flex-col items-center justify-center p-6 relative overflow-hidden">
+      <div class="absolute top-0 left-0 w-full h-1 bg-slate-900">
+        <div class="h-full bg-cyan-500 w-1/4"></div>
+      </div>
+      
+      <div class="max-w-xl w-full z-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div class="text-center mb-8">
+          <h2 class="text-3xl font-bold text-white mb-2">Avant de démarrer...</h2>
+          <p class="text-slate-400">Remplis ces informations pour le calcul de ta date d'objectif.</p>
+        </div>
+
+        <div class="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 md:p-8 shadow-xl">
+          <div class="space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div class="space-y-2">
+                <label class="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center">
+                  <i data-lucide="user" class="w-4 h-4 mr-2 text-cyan-400"></i> Prénom
+                </label>
+                <input type="text" id="input-firstname" value="${state.firstName}" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-cyan-500 transition-colors" placeholder="Ton prénom">
+              </div>
+              <div class="space-y-2">
+                <label class="text-sm font-bold text-slate-300 uppercase tracking-wider">Nom</label>
+                <input type="text" id="input-lastname" value="${state.lastName}" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-cyan-500 transition-colors" placeholder="Ton nom">
+              </div>
+            </div>
+
+            <div class="space-y-2 pt-2">
+              <label class="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center">
+                <i data-lucide="calendar" class="w-4 h-4 mr-2 text-cyan-400"></i> Date de démarrage G.I.A
+              </label>
+              <input type="date" id="input-startdate" value="${state.startDate}" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-cyan-500 transition-colors [color-scheme:dark]">
+              
+              <div class="mt-3 bg-cyan-950/30 border border-cyan-900/50 rounded-lg p-3 flex items-start">
+                <i data-lucide="info" class="w-5 h-5 text-cyan-500 mr-2 shrink-0 mt-0.5"></i>
+                <p class="text-xs text-slate-400 leading-relaxed">
+                  <strong class="text-cyan-400">Où trouver cette date ?</strong><br/>
+                  Consulte ton premier message WhatsApp ou ta fiche de suivi.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-8 pt-6 border-t border-slate-800">
+            <button id="btn-go-quiz" class="w-full py-4 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-xl transition-all flex items-center justify-center cursor-pointer shadow-[0_0_20px_rgba(6,182,212,0.3)]">
+              Commencer l'évaluation <i data-lucide="arrow-right" class="ml-2 w-5 h-5"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const btn = document.getElementById('btn-go-quiz');
+  const checkValidity = () => {
+    const f = document.getElementById('input-firstname').value;
+    const l = document.getElementById('input-lastname').value;
+    const d = document.getElementById('input-startdate').value;
+    if (f && l && d) {
+      btn.disabled = false;
+      btn.classList.remove('opacity-50', 'cursor-not-allowed');
+    } else {
+      btn.disabled = true;
+      btn.classList.add('opacity-50', 'cursor-not-allowed');
+    }
+  };
+
+  ['input-firstname', 'input-lastname', 'input-startdate'].forEach(id => {
+    document.getElementById(id).addEventListener('input', checkValidity);
+  });
+  checkValidity();
+
+  btn.addEventListener('click', () => {
+    state.firstName = document.getElementById('input-firstname').value;
+    state.lastName = document.getElementById('input-lastname').value;
+    state.startDate = document.getElementById('input-startdate').value;
+    state.view = 'quiz';
+    state.currentQ = 0;
+    state.answers = {};
+    render();
+  });
+}
+
+function renderQuiz() {
+  const q = questions[state.currentQ];
+  const progress = (state.currentQ / questions.length) * 100;
+
+  appContainer.innerHTML = `
+    <div class="min-h-screen flex flex-col p-4 md:p-8">
+      <header class="max-w-3xl mx-auto w-full mb-8 flex items-center justify-between">
+        <div class="flex items-center text-slate-400 font-bold text-sm tracking-widest uppercase">
+          <i data-lucide="activity" class="w-5 h-5 mr-2 text-cyan-400"></i> CHECK-UP MOTEUR
+        </div>
+        <div class="text-slate-500 font-bold bg-slate-900 px-4 py-1.5 rounded-full text-sm border border-slate-800">
+          ${state.currentQ + 1} / ${questions.length}
+        </div>
+      </header>
+
+      <div class="max-w-3xl mx-auto w-full h-2 bg-slate-900 rounded-full mb-12 overflow-hidden">
+        <div class="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 transition-all duration-300" style="width: ${progress}%"></div>
+      </div>
+
+      <main class="max-w-3xl mx-auto w-full flex-1 flex flex-col justify-center pb-20 animate-in fade-in duration-500">
+        <h2 class="text-3xl md:text-4xl font-bold text-white leading-tight mb-12 text-center drop-shadow-md">
+          ${q.text}
+        </h2>
+
+        <div class="space-y-4">
+          ${[...q.options].sort((a, b) => a.score - b.score).map((opt, i) => `
+            <button class="opt-btn w-full text-left p-5 md:p-6 rounded-2xl bg-[#0f172a] border border-slate-800 hover:bg-slate-800 hover:border-cyan-500/50 transition-all group relative overflow-hidden cursor-pointer" data-score="${opt.score}">
+              <div class="flex items-center">
+                <div class="w-6 h-6 shrink-0 rounded-full border-2 border-slate-600 flex items-center justify-center mr-4 group-hover:border-cyan-500 transition-colors">
+                  <div class="w-3 h-3 rounded-full bg-transparent group-hover:bg-cyan-500 transition-colors"></div>
+                </div>
+                <div>
+                  <span class="block text-lg font-bold text-white group-hover:text-cyan-50 transition-colors">${opt.text}</span>
+                  <span class="block text-sm text-slate-400 mt-1 leading-snug">${opt.subtitle}</span>
+                </div>
+              </div>
+            </button>
+          `).join('')}
+        </div>
+      </main>
+    </div>
+  `;
+
+  document.querySelectorAll('.opt-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const score = parseFloat(btn.dataset.score);
+      state.answers[state.currentQ] = score;
+      
+      if (state.currentQ < questions.length - 1) {
+        state.currentQ++;
+        render();
+      } else {
+        state.view = 'result';
+        saveDiagnostic();
+        render();
+      }
+    });
+  });
+}
+
+function renderResult() {
+  const stats = calculateScore();
+  const weakPoints = getWeakPoints();
+  const isGood = stats.percentage >= 75;
+  const anglePercentage = (36 - stats.estimatedMonths) / 32;
+  const needleAngle = -90 + (anglePercentage * 180);
+  
+  const startDate = new Date(state.startDate);
+  startDate.setMonth(startDate.getMonth() + stats.estimatedMonths);
+  const endDateStr = startDate.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+
+  appContainer.innerHTML = `
+    <div class="min-h-screen flex flex-col p-6 overflow-y-auto">
+      <div class="max-w-5xl mx-auto w-full animate-in fade-in zoom-in-95 duration-700 py-8">
+        <div class="text-center mb-10">
+          <h2 class="text-3xl font-bold text-slate-400 mb-2">Bilan du Moteur</h2>
+          <h1 class="text-5xl font-black text-white">Votre Rythme Actuel</h1>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
+          <div class="bg-[#0b1121] border border-slate-800 rounded-3xl p-8 flex flex-col items-center justify-center relative shadow-inner">
+            <div class="relative w-[280px] h-[140px] flex flex-col items-center overflow-visible">
+              <svg viewBox="0 0 200 120" class="absolute top-0 w-full h-full drop-shadow-[0_0_15px_rgba(34,211,238,0.15)] overflow-visible">
+                <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="#1e293b" stroke-width="12" stroke-linecap="round" />
+                <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="currentColor" class="${isGood ? 'text-emerald-500' : 'text-orange-500'}" stroke-width="12" stroke-linecap="round" stroke-dasharray="251" stroke-dashoffset="${251 - (251 * anglePercentage)}" />
+                <g style="transform-origin: 100px 100px; transform: rotate(${needleAngle}deg)">
+                  <polygon points="97,100 103,100 100,20" fill="white" />
+                </g>
+                <circle cx="100" cy="100" r="10" fill="#0f172a" stroke="#334155" stroke-width="3" />
+              </svg>
+              <div class="absolute top-[85%] w-full flex justify-between px-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                <span>Danger<br/>(3 Ans)</span>
+                <span class="text-right text-cyan-500">Excellence<br/>(4 Mois)</span>
+              </div>
+            </div>
+
+            <div class="mt-8 text-center">
+              <span class="text-xs text-slate-500 font-bold uppercase tracking-widest block mb-2">Durée d'apprentissage requise</span>
+              <div class="text-5xl font-black tabular-nums tracking-tighter mb-4 ${isGood ? 'text-cyan-400' : 'text-orange-400'}">
+                ${stats.estimatedMonths} mois
+              </div>
+              <div class="inline-flex items-center px-4 py-2 bg-slate-900/80 border border-slate-700 rounded-full">
+                <i data-lucide="calendar-check" class="w-4 h-4 text-emerald-400 mr-2"></i>
+                <span class="text-sm font-medium text-slate-300">
+                  Maîtrise estimée : <strong class="text-white capitalize">${endDateStr}</strong>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex flex-col justify-center space-y-6">
+            <div class="bg-slate-900 border border-slate-700 rounded-2xl p-6">
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="font-bold text-slate-300 uppercase tracking-wider text-sm">Score d'Alignement</h3>
+                <span class="px-3 py-1 rounded-full text-sm font-bold ${isGood ? 'bg-emerald-900/50 text-emerald-400' : 'bg-orange-900/50 text-orange-400'}">
+                  ${stats.percentage}%
+                </span>
+              </div>
+              <p class="text-slate-400 text-sm leading-relaxed">
+                ${isGood 
+                  ? `Excellent ${state.firstName} ! Tu respectes la méthode à la lettre. Ton moteur tourne à plein régime.`
+                  : `Attention ${state.firstName}, tu laisses de la puissance sur le bord de la route. Ton objectif s'éloigne.`}
+              </p>
+            </div>
+
+            <button id="btn-print" class="w-full py-4 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-xl transition-all shadow-lg flex items-center justify-center cursor-pointer">
+              <i data-lucide="printer" class="w-5 h-5 mr-3"></i> Imprimer mon Bilan (PDF)
+            </button>
+            
+            <button id="btn-back-history" class="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-bold rounded-xl transition-all cursor-pointer">
+              Retour au tableau de bord
+            </button>
+          </div>
+        </div>
+
+        ${weakPoints.length > 0 ? `
+          <div class="bg-slate-900/50 border border-slate-700 rounded-3xl p-6 md:p-10">
+            <div class="flex items-center mb-6">
+              <i data-lucide="alert-triangle" class="w-6 h-6 text-orange-400 mr-3"></i>
+              <h3 class="text-2xl font-bold text-white">Fuites de moteur identifiées</h3>
+            </div>
+            <div class="space-y-4">
+              ${weakPoints.map(wp => `
+                <div class="bg-slate-800/80 border-l-4 border-orange-500 rounded-r-xl p-5">
+                  <div class="md:flex justify-between items-start gap-6">
+                    <div class="flex-1 mb-2 md:mb-0">
+                      <span class="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1">Point faible :</span>
+                      <p class="text-slate-300 font-medium text-sm">"${wp.text}"</p>
+                    </div>
+                    <div class="flex-1">
+                      <span class="text-xs font-bold text-cyan-500 uppercase tracking-widest block mb-1">Le conseil G.I.A :</span>
+                      <p class="text-cyan-50 text-sm leading-relaxed">${wp.advice}</p>
+                    </div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+      </div>
+    </div>
+  `;
+
+  document.getElementById('btn-print').addEventListener('click', () => window.print());
+  document.getElementById('btn-back-history').addEventListener('click', () => {
+    state.view = 'history';
+    render();
+  });
+}
+
+function renderHistory() {
+  appContainer.innerHTML = `
+    <div class="min-h-screen flex flex-col p-6 overflow-y-auto">
+      <div class="max-w-4xl mx-auto w-full animate-in fade-in duration-500 py-8">
+        <header class="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 gap-4">
+          <div>
+            <h1 class="text-3xl font-black text-white flex items-center">
+              <i data-lucide="line-chart" class="w-8 h-8 mr-3 text-cyan-400"></i> Ton Évolution
+            </h1>
+            <p class="text-slate-400 mt-2">Suivi pour <strong class="text-white">${state.firstName} ${state.lastName}</strong></p>
+          </div>
+          <button id="btn-new-diag" class="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl transition-all border border-slate-600 text-sm flex items-center w-full md:w-auto justify-center cursor-pointer">
+            <i data-lucide="refresh-cw" class="w-4 h-4 mr-2"></i> Nouveau Diagnostic
+          </button>
+        </header>
+
+        <div class="space-y-6">
+          ${state.history.map((diag, idx) => `
+            <div class="bg-slate-900 border rounded-2xl p-6 transition-all ${idx === 0 ? 'border-cyan-500/50 shadow-lg' : 'border-slate-800 opacity-80'}">
+              <div class="flex flex-col md:flex-row justify-between md:items-center gap-6">
+                <div class="flex-1">
+                  <div class="flex items-center gap-3 mb-2">
+                    <span class="text-sm text-slate-400 font-medium">${new Date(diag.createdAt).toLocaleDateString()}</span>
+                    ${idx === 0 ? '<span class="text-[10px] uppercase font-bold tracking-widest bg-cyan-900/50 text-cyan-400 px-2 py-0.5 rounded-full border border-cyan-800">Récent</span>' : ''}
+                  </div>
+                  <h3 class="text-xl font-bold text-white mb-1">Rythme : <span class="${diag.score >= 75 ? 'text-emerald-400' : 'text-orange-400'}">${diag.estimatedMonths} mois</span></h3>
+                  <p class="text-sm text-slate-400">Alignement : <strong class="text-slate-200">${diag.score}%</strong></p>
+                </div>
+                <div class="flex items-center gap-4 border-t md:border-t-0 md:border-l border-slate-800 pt-4 md:pt-0 md:pl-6">
+                  <button class="view-diag-btn px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm font-bold cursor-pointer" data-id="${diag.id}">Voir détails</button>
+                </div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('btn-new-diag').addEventListener('click', () => {
+    state.view = 'setup';
+    render();
+  });
+
+  document.querySelectorAll('.view-diag-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const diag = state.history.find(d => d.id === btn.dataset.id);
+      if (diag) {
+        state.answers = diag.answers;
+        state.firstName = diag.firstName;
+        state.lastName = diag.lastName;
+        state.startDate = diag.startDate;
+        state.view = 'result';
+        render();
+      }
+    });
+  });
+}
+
+// Lancement
+initFirebase();
+render();

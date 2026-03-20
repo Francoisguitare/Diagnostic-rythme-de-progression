@@ -154,13 +154,13 @@ function calculateScore() {
   const percentage = totalScore / maxScore;
   
   let estimatedMonths = 36;
-  if (percentage >= 0.95) estimatedMonths = 4;
-  else if (percentage >= 0.85) estimatedMonths = 5;
-  else if (percentage >= 0.75) estimatedMonths = 6;
-  else if (percentage >= 0.60) estimatedMonths = 8;
-  else if (percentage >= 0.45) estimatedMonths = 10;
-  else if (percentage >= 0.30) estimatedMonths = 14;
-  else if (percentage >= 0.15) estimatedMonths = 24;
+  if (percentage >= 1) estimatedMonths = 6;
+  else if (percentage >= 0.90) estimatedMonths = 8;
+  else if (percentage >= 0.80) estimatedMonths = 10;
+  else if (percentage >= 0.70) estimatedMonths = 12;
+  else if (percentage >= 0.60) estimatedMonths = 14;
+  else if (percentage >= 0.45) estimatedMonths = 18;
+  else if (percentage >= 0.30) estimatedMonths = 24;
   else estimatedMonths = 36;
   
   return {
@@ -387,8 +387,8 @@ function renderQuiz() {
 function renderResult() {
   const stats = calculateScore();
   const weakPoints = getWeakPoints();
-  const isGood = stats.percentage >= 75;
-  const anglePercentage = (36 - stats.estimatedMonths) / 32;
+  const isGood = stats.percentage === 100;
+  const anglePercentage = (36 - stats.estimatedMonths) / 30;
   const needleAngle = -90 + (anglePercentage * 180);
   
   const startDate = new Date(state.startDate);
@@ -416,7 +416,7 @@ function renderResult() {
               </svg>
               <div class="absolute top-[85%] w-full flex justify-between px-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">
                 <span>Danger<br/>(3 Ans)</span>
-                <span class="text-right text-cyan-500">Excellence<br/>(4 Mois)</span>
+                <span class="text-right text-cyan-500">Excellence<br/>(6 Mois)</span>
               </div>
             </div>
 
